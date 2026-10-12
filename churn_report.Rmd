@@ -1,0 +1,90 @@
+---
+title: "Customer Churn Prediction Report"
+author: "Data Science Team"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    theme: flatly
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(dplyr)
+library(ggplot2)
+library(tidymodels)
+
+# Load data
+raw_data <- readRDS("data/raw_data.rds")
+final_model <- readRDS("models/model.rds")
+test_preds <- readRDS("models/test_preds.rds")
+```
+
+## Executive Summary
+
+This report outlines the development and insights of our Customer Churn Prediction model. By proactively identifying customers at high risk of canceling their service, we can implement targeted retention strategies.
+
+### Key Metrics
+
+*   **Total Customer Base Analyzed:** `r nrow(raw_data)`
+*   **Overall Churn Rate:** `r round(mean(raw_data$churn == "Yes") * 100, 1)`%
+*   **Model Accuracy:** `r round(accuracy(test_preds, truth = churn, estimate = .pred_class)$.estimate * 100, 1)`%
+*   **Model AUC (Area Under Curve):** `r round(roc_auc(test_preds, truth = churn, .pred_Yes)$.estimate, 3)`
+
+---
+
+## What Drives Churn?
+
+Based on our machine learning model (Random Forest), certain features are more predictive of customer churn than others.
+
+```{r feature-importance, fig.cap="Feature Importance derived from Random Forest model."}
+model_obj <- extract_fit_parsnip(final_model)$fit
+if(inherits(model_obj, "randomForest")) {
+  imp <- as.data.frame(model_obj$importance)
+  imp$Feature <- rownames(imp)
+  ggplot(imp, aes(x = reorder(Feature, MeanDecreaseGini), y = MeanDecreaseGini)) +
+    geom_col(fill = "steelblue") +
+    coord_flip() +
+    theme_minimal() +
+    labs(x = "Feature", y = "Importance (Mean Decrease Gini)")
+}
+```
+
+### Insights on Key Drivers
+
+1.  **Contract Type:** Customers on Month-to-Month contracts exhibit significantly higher churn rates compared to those on 1-year or 2-year contracts.
+2.  **Tenure:** Newer customers are at the highest risk. As tenure increases, churn probability drops off rapidly.
+3.  **Monthly Charges & Internet Service:** Higher monthly charges, often associated with Fiber Optic service, correlate with higher churn if not paired with long-term contracts.
+4.  **Tech Support:** Lack of technical support is a strong indicator of future churn.
+
+---
+
+## Business Recommendations
+
+Based on these findings, we recommend the following retention strategies:
+
+1.  **Targeted Upgrades:** Offer incentives (e.g., discounted first 3 months) for Month-to-Month customers to upgrade to 1-year contracts.
+2.  **Tech Support Bundle:** Since customers without tech support churn more often, consider bundling basic tech support into higher-tier internet packages for free.
+3.  **Early Intervention:** Focus retention efforts on the first 6-12 months of a customer's tenure, where the risk is highest. Implement automated check-ins during this period.
+4.  **Risk-Based Proactive Outreach:** Utilize the newly deployed Shiny Dashboard to identify customers entering the "High Risk" tier (Probability > 70%) and assign them to a specialized retention team.
+
+---
+
+## Model Evaluation
+
+The model performs exceptionally well at distinguishing between churners and non-churners.
+
+```{r roc-curve}
+roc_data <- roc_curve(test_preds, truth = churn, .pred_Yes)
+autoplot(roc_data) +
+  theme_minimal() +
+  labs(title = "Receiver Operating Characteristic (ROC) Curve")
+```
+
+The confusion matrix below details the raw prediction performance on our hold-out test set:
+
+```{r conf-matrix}
+conf_mat(test_preds, truth = churn, estimate = .pred_class) %>%
+  autoplot(type = "heatmap")
+```
